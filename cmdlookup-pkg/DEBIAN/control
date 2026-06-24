@@ -1,8 +1,0 @@
-Package: cmdlookup
-Version: 1.0.0
-Architecture: all
-Maintainer: Pixeleyesd
-Description: A simple command-line Linux command lookup tool.
-Section: utils
-Priority: optional
-Depends: bash, curl, coreutils
