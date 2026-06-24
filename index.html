@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cmdlookup</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: Helvetica, "Noto Sans", sans-serif;
+    background: #000;
+    color: #fff;
+    min-height: 100vh;
+  }
+
+  #topBar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 10px;
+    background-color: rgba(0,0,0,0.25);
+    backdrop-filter: blur(5px) grayscale(100%);
+    color: #fff;
+    border-bottom: 1px solid rgba(255,255,255,0.2);
+    height: 36px;
+  }
+
+  #topBar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  #topBar span {
+    font-weight: 700;
+    font-size: 14px;
+  }
+
+  #timeelement {
+    font-weight: 700;
+    font-size: 13px;
+    background-color: rgba(255,255,255,0.125);
+    padding: 2px 10px;
+    border-radius: 16px;
+  }
+
+  #main {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 40px 16px 60px;
+  }
+
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 6px;
+  }
+
+  .subtitle {
+    color: rgba(255,255,255,0.5);
+    font-size: 13px;
+    margin-bottom: 28px;
+  }
+
+  #searchRow {
+    display: flex;
+    gap: 0;
+    margin-bottom: 32px;
+    border: 1px solid #fff;
+  }
+
+  #cmdInput {
+    flex: 1;
+    background: #000;
+    color: #fff;
+    border: none;
+    padding: 10px 14px;
+    font-family: "Courier New", monospace;
+    font-size: 15px;
+    outline: none;
+  }
+
+  #cmdInput::placeholder {
+    color: rgba(255,255,255,0.35);
+  }
+
+  #searchBtn {
+    background: #fff;
+    color: #000;
+    border: none;
+    padding: 10px 20px;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    font-family: Helvetica, sans-serif;
+    letter-spacing: 0.5px;
+  }
+
+  #searchBtn:hover { background: #ccc; }
+  #searchBtn:active { background: #aaa; }
+
+  #status {
+    font-size: 13px;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 16px;
+    min-height: 18px;
+    font-family: "Courier New", monospace;
+  }
+
+  #results { display: none; }
+
+  .section-label {
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+    margin-bottom: 8px;
+    margin-top: 28px;
+  }
+
+  .section-label:first-child { margin-top: 0; }
+
+  #descBox {
+    border: 1px solid #fff;
+    padding: 14px 16px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: rgba(255,255,255,0.85);
+    background: rgba(255,255,255,0.04);
+  }
+
+  #descBox strong {
+    color: #fff;
+    display: block;
+    font-size: 18px;
+    margin-bottom: 6px;
+  }
+
+  #descBox .pkg-meta {
+    font-size: 12px;
+    color: rgba(255,255,255,0.4);
+    margin-top: 8px;
+    font-family: "Courier New", monospace;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  table th {
+    text-align: left;
+    padding: 8px 10px;
+    border: 1px solid rgba(255,255,255,0.3);
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    background: rgba(255,255,255,0.05);
+  }
+
+  table td {
+    padding: 8px 10px;
+    border: 1px solid rgba(255,255,255,0.15);
+    vertical-align: middle;
+  }
+
+  td.pm-name {
+    font-weight: 700;
+    width: 110px;
+    color: rgba(255,255,255,0.7);
+    font-size: 12px;
+    letter-spacing: 0.5px;
+  }
+
+  td.pm-cmd {
+    font-family: "Courier New", monospace;
+    color: #fff;
+    font-size: 13px;
+  }
+
+  td.pm-status {
+    width: 80px;
+    font-size: 11px;
+    text-align: center;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    border: 1px solid;
+  }
+
+  .badge-ok { border-color: rgba(100,255,150,0.5); color: rgba(100,255,150,0.9); }
+  .badge-no { border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.3); }
+  .badge-loading { border-color: rgba(255,255,255,0.3); color: rgba(255,255,255,0.5); }
+
+  .copy-btn {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.3);
+    color: rgba(255,255,255,0.6);
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: Helvetica, sans-serif;
+    margin-left: 8px;
+  }
+
+  .copy-btn:hover { border-color: #fff; color: #fff; background: rgba(255,255,255,0.08); }
+  .copy-btn.copied { color: rgba(100,255,150,0.9); border-color: rgba(100,255,150,0.5); }
+
+  #helpBox {
+    border: 1px solid rgba(255,255,255,0.3);
+    background: #0a0a0a;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  #helpBox-tabs {
+    display: flex;
+    border-bottom: 1px solid rgba(255,255,255,0.2);
+  }
+
+  .help-tab {
+    padding: 7px 16px;
+    font-size: 12px;
+    cursor: pointer;
+    color: rgba(255,255,255,0.45);
+    border-right: 1px solid rgba(255,255,255,0.1);
+    background: transparent;
+    border-top: none;
+    border-left: none;
+    border-bottom: none;
+    font-family: Helvetica, sans-serif;
+  }
+
+  .help-tab:hover { color: #fff; background: rgba(255,255,255,0.05); }
+  .help-tab.active { color: #fff; background: rgba(255,255,255,0.08); border-bottom: 2px solid #fff; margin-bottom: -1px; }
+
+  #helpContent {
+    padding: 14px 16px;
+    font-family: "Courier New", monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    color: rgba(255,255,255,0.8);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 340px;
+    overflow-y: auto;
+    min-height: 80px;
+  }
+
+  #helpContent::-webkit-scrollbar { width: 4px; }
+  #helpContent::-webkit-scrollbar-track { background: #000; }
+  #helpContent::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); }
+
+  .err {
+    border: 1px solid rgba(255,100,80,0.5);
+    color: rgba(255,130,110,0.9);
+    padding: 12px 16px;
+    font-size: 13px;
+    background: rgba(255,60,40,0.06);
+  }
+
+  #noResult {
+    color: rgba(255,255,255,0.4);
+    font-size: 14px;
+    padding: 20px 0;
+    display: none;
+  }
+
+  footer {
+    text-align: center;
+    padding: 16px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.2);
+    border-top: 1px solid rgba(255,255,255,0.08);
+    margin-top: 60px;
+  }
+
+  footer a { color: rgba(255,255,255,0.35); text-decoration: none; }
+  footer a:hover { color: rgba(255,255,255,0.7); }
+</style>
+</head>
+<body>
+
+<div id="main">
+  <h1>cmdLookup</h1>
+  <p class="subtitle">Type a Linux command, find its package, install it everywhere, read its help :)</p>
+
+  <div id="searchRow">
+    <input id="cmdInput" type="text" placeholder="e.g. curl, ffmpeg, rg, jq ..." autocomplete="off" spellcheck="false" />
+    <button id="searchBtn">LOOKUP</button>
+  </div>
+
+  <div id="status"></div>
+  <div id="noResult">No package found for that command. Try a different spelling, or it may be a shell built-in.</div>
+
+  <div id="results">
+    <div class="section-label">Package</div>
+    <div id="descBox"></div>
+
+    <div class="section-label">Install commands</div>
+    <table id="installTable">
+      <thead>
+        <tr>
+          <th>Package manager</th>
+          <th>Install command</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="installBody"></tbody>
+    </table>
+
+    <div class="section-label">Help &amp; usage</div>
+    <div id="helpBox">
+      <div id="helpBox-tabs"></div>
+      <div id="helpContent">Select a source above.</div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  Data: <a href="https://repology.org" target="_blank">Repology</a> &middot; <a href="https://tldr.sh" target="_blank">tldr-pages</a> &middot; <a href="https://explainshell.com" target="_blank">explainshell</a>
+</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const status = msg => { $('status').textContent = msg; };
+
+const PM_MAP = [
+  { id: 'ubuntu_24',   name: 'apt',      label: 'apt (Debian/Ubuntu)',   cmd: n => `sudo apt install ${n}`,       field: 'ubuntu_24' },
+  { id: 'fedora_40',   name: 'dnf',      label: 'dnf (Fedora/RHEL)',     cmd: n => `sudo dnf install ${n}`,       field: 'fedora_40' },
+  { id: 'arch',        name: 'pacman',   label: 'pacman (Arch)',          cmd: n => `sudo pacman -S ${n}`,         field: 'arch' },
+  { id: 'nix_unstable',name: 'nix',      label: 'nix (NixOS)',           cmd: n => `nix-env -iA nixpkgs.${n}`,   field: 'nix_unstable' },
+  { id: 'homebrew',    name: 'brew',     label: 'brew (macOS/Linux)',     cmd: n => `brew install ${n}`,           field: 'homebrew' },
+  { id: 'alpine_3_20', name: 'apk',      label: 'apk (Alpine)',           cmd: n => `sudo apk add ${n}`,           field: 'alpine_3_20' },
+  { id: 'opensuse_tumbleweed', name: 'zypper', label: 'zypper (openSUSE)', cmd: n => `sudo zypper install ${n}`,  field: 'opensuse_tumbleweed' },
+];
+
+const HELP_SOURCES = [
+  {
+    id: 'tldr',
+    label: 'tldr',
+    fetch: async (cmd) => {
+      const r = await fetch(`https://raw.githubusercontent.com/tldr-pages/tldr/main/pages/common/${cmd}.md`);
+      if (!r.ok) {
+        const r2 = await fetch(`https://raw.githubusercontent.com/tldr-pages/tldr/main/pages/linux/${cmd}.md`);
+        if (!r2.ok) throw new Error('No tldr page');
+        return parseTldr(await r2.text());
+      }
+      return parseTldr(await r.text());
+    }
+  },
+  {
+    id: 'manpage',
+    label: 'man (synopsis)',
+    fetch: async (cmd) => {
+      const r = await fetch(`https://man.archlinux.org/man/${cmd}.1`);
+      if (!r.ok) throw new Error('No man page');
+      const html = await r.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      const pre = doc.querySelector('pre');
+      if (!pre) throw new Error('Could not parse man page');
+      return pre.textContent.slice(0, 3000);
+    }
+  }
+];
+
+function parseTldr(md) {
+  return md
+    .replace(/^#\s.+$/m, '')
+    .replace(/^>\s?/gm, '')
+    .trim();
+}
+
+let helpData = {};
+let activeSrc = null;
+
+function setHelpTab(id) {
+  activeSrc = id;
+  document.querySelectorAll('.help-tab').forEach(t => t.classList.toggle('active', t.dataset.src === id));
+  const content = helpData[id];
+  if (content && content.text) {
+    $('helpContent').textContent = content.text;
+  } else if (content && content.loading) {
+    $('helpContent').textContent = 'Loading…';
+  } else if (content && content.error) {
+    $('helpContent').textContent = `(not available — ${content.error})`;
+  } else {
+    $('helpContent').textContent = 'Loading…';
+  }
+}
+
+async function loadHelp(cmd) {
+  const tabsEl = $('helpBox-tabs');
+  tabsEl.innerHTML = '';
+  helpData = {};
+
+  for (const src of HELP_SOURCES) {
+    helpData[src.id] = { loading: true };
+    const btn = document.createElement('button');
+    btn.className = 'help-tab';
+    btn.textContent = src.label;
+    btn.dataset.src = src.id;
+    btn.onclick = () => setHelpTab(src.id);
+    tabsEl.appendChild(btn);
+  }
+
+  setHelpTab(HELP_SOURCES[0].id);
+
+  for (const src of HELP_SOURCES) {
+    try {
+      const text = await src.fetch(cmd);
+      helpData[src.id] = { text };
+    } catch (e) {
+      helpData[src.id] = { error: e.message };
+    }
+    if (activeSrc === src.id) setHelpTab(src.id);
+  }
+}
+
+function copyText(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'copied';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 1500);
+  });
+}
+
+async function lookup(rawCmd) {
+  const cmd = rawCmd.trim().toLowerCase();
+  if (!cmd) return;
+
+  $('results').style.display = 'none';
+  $('noResult').style.display = 'none';
+  $('descBox').innerHTML = '';
+  $('installBody').innerHTML = '';
+  $('helpContent').textContent = 'Select a source above.';
+  $('helpBox-tabs').innerHTML = '';
+  helpData = {};
+
+  status(`looking up "${cmd}" …`);
+
+  let data;
+  try {
+    const url = `https://repology.org/api/v1/projects/?search=${encodeURIComponent(cmd)}&limit=10&has_related=`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`Repology returned ${resp.status}`);
+    data = await resp.json();
+  } catch (e) {
+    status('');
+    $('descBox').innerHTML = `<div class="err">Network error: ${e.message}. Repology CORS may block this in some browsers — try from a deployed GitHub Pages URL.</div>`;
+    $('results').style.display = 'block';
+    return;
+  }
+
+  const keys = Object.keys(data);
+  if (!keys.length) {
+    status('');
+    $('noResult').style.display = 'block';
+    return;
+  }
+
+  const scored = keys.map(k => {
+    const pkgs = data[k];
+    let score = 0;
+    if (k === cmd) score += 100;
+    else if (k.startsWith(cmd)) score += 50;
+    else if (k.includes(cmd)) score += 20;
+    const hasBinname = pkgs.some(p => p.binnames && p.binnames.includes(cmd));
+    if (hasBinname) score += 200;
+    return { k, pkgs, score };
+  }).sort((a, b) => b.score - a.score);
+
+  const best = scored[0];
+  const pkgName = best.k;
+  const pkgs = best.pkgs;
+
+  const descPkg = pkgs.find(p => p.summary) || pkgs[0];
+  const summary = descPkg.summary || 'No description available.';
+  const version = descPkg.version || '';
+  const licenses = descPkg.licenses ? descPkg.licenses.join(', ') : '';
+
+  $('descBox').innerHTML = `
+    <strong>${pkgName}</strong>
+    ${summary}
+    <div class="pkg-meta">${version ? `version: ${version}` : ''}${version && licenses ? ' &nbsp;|&nbsp; ' : ''}${licenses ? `license: ${licenses}` : ''}</div>
+  `;
+
+  const tbody = $('installBody');
+  for (const pm of PM_MAP) {
+    const match = pkgs.find(p => p.repo && p.repo.includes(pm.field.split('_')[0]) && p.repo.includes(pm.id.replace('_', '')));
+    const repoMatch = pkgs.find(p => {
+      if (!p.repo) return false;
+      return p.repo === pm.id || p.repo.startsWith(pm.field.replace(/_\d+/g, '').replace(/_/g, ''));
+    });
+    const found = match || repoMatch;
+    const installName = found ? (found.binnames ? found.binnames[0] : pkgName) : pkgName;
+    const installCmd = pm.cmd(installName);
+    const available = !!found;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="pm-name">${pm.label}</td>
+      <td class="pm-cmd">${installCmd}</td>
+      <td class="pm-status"><span class="badge ${available ? 'badge-ok' : 'badge-no'}">${available ? 'found' : 'try'}</span></td>
+      <td><button class="copy-btn" onclick="copyText('${installCmd.replace(/'/g, "\\'")}', this)">copy</button></td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  $('results').style.display = 'block';
+  status(`found: ${pkgName} — ${pkgs.length} repo${pkgs.length !== 1 ? 's' : ''}`);
+
+  loadHelp(cmd);
+}
+
+$('searchBtn').addEventListener('click', () => lookup($('cmdInput').value));
+$('cmdInput').addEventListener('keydown', e => { if (e.key === 'Enter') lookup($('cmdInput').value); });
+
+function updateClock() {
+  const now = new Date();
+  $('timeelement').textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+updateClock();
+setInterval(updateClock, 10000);
+</script>
+</body>
+</html>
