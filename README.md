@@ -65,7 +65,7 @@ cmdlookup nvim --brew
 cmdlookup nvim --snap
 ```
 
-| Flag     | Long Flag | Description |
+| Flag     | Long Flag     | Description |
 |:---------|:----------|:------------|
 | ```-i```   | ```--install```    | Automatically runs your system's native package manager command to install the targeted tool. |
 | ```-v``` | ```--verbose``` | Shows real-time network connections and API fallback status. |
