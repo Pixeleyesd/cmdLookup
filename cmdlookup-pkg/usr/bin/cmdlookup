@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+
+# --- Configuration & APIs ---
+PKG_API_PRIMARY="https://command-not-found.com"
+PKG_API_BACKUP="https://packages.debian.org/search?keywords="
+CH_API="https://cheat.sh"
+
+# --- Terminal Size & Columns ---
+TERM_COLS=$(tput cols 2>/dev/null || echo 80)
+HALF_COLS=$((TERM_COLS / 2 - 2))
+
+show_help() {
+    echo "Usage: cmdlookup [command] [options]"
+    echo ""
+    echo "Options:"
+    echo "  --apt, --ubuntu, --debian    Show only APT installation info"
+    echo "  --pacman, --arch             Show only Pacman installation info"
+    echo "  --dnf, --redhat              Show only DNF/RedHat installation info"
+    echo "  --zypper, --suse             Show only Zypper installation info"
+    echo "  --brew, --mac                Show only Homebrew installation info"
+    echo "  --snap                       Show only Snap installation info"
+    echo "  -v, --verbose                Show verbose network API fetch status"
+    echo "  -u, --update                 Show instructions to update package databases"
+    echo "  --json                       Output local/remote status summary in JSON format"
+    echo "  --help, -h                   Show this help menu"
+    exit 0
+}
+
+# --- Parse Arguments ---
+COMMAND=""
+FILTER=""
+VERBOSE=false
+JSON_OUTPUT=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --apt|--ubuntu|--debian) FILTER="apt"; shift ;;
+        --pacman|--arch)          FILTER="pacman"; shift ;;
+        --dnf|--redhat)          FILTER="dnf"; shift ;;
+        --zypper|--suse)         FILTER="zypper"; shift ;;
+        --brew|--mac)            FILTER="brew"; shift ;;
+        --snap)                  FILTER="snap"; shift ;;
+        -v|--verbose)            VERBOSE=true; shift ;;
+        --json)                  JSON_OUTPUT=true; shift ;;
+        -u|--update)
+            echo "Package Update Commands:"
+            echo "  APT:    sudo apt update"
+            echo "  Pacman: sudo pacman -Syy"
+            echo "  DNF:    sudo dnf check-update"
+            echo "  Zypper: sudo zypper refresh"
+            echo "  Brew:   brew update"
+            exit 0
+            ;;
+        --help|-h)               show_help ;;
+        *)                       COMMAND="$1"; shift ;;
+    esac
+done
+
+if [ -z "$COMMAND" ]; then
+    show_help
+fi
+
+# --- Step 1: Check Local Presence ---
+LOCAL_STATUS="Not installed"
+LOCAL_HELP=""
+LOCAL_DESC=""
+
+if command -v "$COMMAND" >/dev/null 2>&1; then
+    LOCAL_STATUS="Installed at $(command -v "$COMMAND")"
+    LOCAL_DESC=$(whatis "$COMMAND" 2>/dev/null | awk -F ' - ' '{print $2}')
+    LOCAL_HELP=$("$COMMAND" --help 2>&1 | head -n 15)
+fi
+
+if [ "$JSON_OUTPUT" = true ]; then
+    echo "{\"command\": \"$COMMAND\", \"status\": \"$LOCAL_STATUS\", \"description\": \"${LOCAL_DESC:-None}\"}"
+    exit 0
+fi
+
+echo "Command: $COMMAND"
+echo "--------------------------------------------------------------------------------"
+echo "Status: $LOCAL_STATUS"
+echo "--------------------------------------------------------------------------------"
+
+# --- Step 2: Fetch Remote Package Data & Metadata ---
+REMOTE_DESC=""
+CHEAT_RAW=""
+
+INSTALL_APT="sudo apt install $COMMAND"
+INSTALL_PACMAN="sudo pacman -S $COMMAND"
+INSTALL_DNF="sudo dnf install $COMMAND"
+INSTALL_ZYP="sudo zypper install $COMMAND"
+INSTALL_BREW="brew install $COMMAND"
+INSTALL_SNAP="sudo snap install $COMMAND"
+
+clean_html() {
+    sed -e 's/<[^>]*>//g' | sed 's/^[ \t]*//;s/[ \t]*$//'
+}
+
+# Try Primary API
+$VERBOSE && echo "[*] Connecting to primary API: $PKG_API_PRIMARY/$COMMAND"
+HTML_DATA=$(curl -sL --max-time 5 "$PKG_API_PRIMARY/$COMMAND")
+
+# Fallback Routing if primary is dead/empty
+if [ -z "$HTML_DATA" ] || echo "$HTML_DATA" | grep -q "404 Not Found"; then
+    $VERBOSE && echo "[!] Primary API down or 404. Switching to backup: $PKG_API_BACKUP$COMMAND"
+    HTML_DATA=$(curl -sL --max-time 5 "$PKG_API_BACKUP$COMMAND")
+    
+    # Process backup response parsing pattern (Debian format)
+    if echo "$HTML_DATA" | grep -q "Package"; then
+        BACKUP_PKG=$(echo "$HTML_DATA" | grep -oP '(?<=<h3>Package ).*?(?=</h3>)' | head -n 1 | awk '{print $1}' | tr -d ':')
+        if [ ! -z "$BACKUP_PKG" ]; then
+            INSTALL_APT="sudo apt install $BACKUP_PKG"
+            INSTALL_PACMAN="sudo pacman -S $BACKUP_PKG"
+            INSTALL_DNF="sudo dnf install $BACKUP_PKG"
+        fi
+    fi
+else
+    # Parse exact package names from primary layout
+    if echo "$HTML_DATA" | grep -q "apt-get install"; then
+        APT_PKG=$(echo "$HTML_DATA" | grep -A 1 "apt-get install" | clean_html | grep "apt-get install" | head -n 1 | awk '{print $3}')
+        [ ! -z "$APT_PKG" ] && INSTALL_APT="sudo apt install $APT_PKG"
+    fi
+    if echo "$HTML_DATA" | grep -q "pacman -S"; then
+        PAC_PKG=$(echo "$HTML_DATA" | grep -A 1 "pacman -S" | clean_html | grep "pacman" | head -n 1 | awk '{print $3}')
+        [ ! -z "$PAC_PKG" ] && INSTALL_PACMAN="sudo pacman -S $PAC_PKG"
+    fi
+    if echo "$HTML_DATA" | grep -q "dnf install"; then
+        DNF_PKG=$(echo "$HTML_DATA" | grep -A 1 "dnf install" | clean_html | grep "dnf" | head -n 1 | awk '{print $3}')
+        [ ! -z "$DNF_PKG" ] && INSTALL_DNF="sudo dnf install $DNF_PKG"
+    fi
+    if echo "$HTML_DATA" | grep -q "zypper install"; then
+        ZYP_PKG=$(echo "$HTML_DATA" | grep -A 1 "zypper install" | clean_html | grep "zypper" | head -n 1 | awk '{print $3}')
+        [ ! -z "$ZYP_PKG" ] && INSTALL_ZYP="sudo zypper install $ZYP_PKG"
+    fi
+    if echo "$HTML_DATA" | grep -q "brew install"; then
+        BREW_PKG=$(echo "$HTML_DATA" | grep -A 1 "brew install" | clean_html | grep "brew" | head -n 1 | awk '{print $3}')
+        [ ! -z "$BREW_PKG" ] && INSTALL_BREW="brew install $BREW_PKG"
+    fi
+    if echo "$HTML_DATA" | grep -q "snap install"; then
+        SNAP_PKG=$(echo "$HTML_DATA" | grep -A 1 "snap install" | clean_html | grep "snap" | head -n 1 | awk '{print $3}')
+        [ ! -z "$SNAP_PKG" ] && INSTALL_SNAP="sudo snap install $SNAP_PKG"
+    fi
+fi
+
+# Fetch cheat-sheet raw content
+$VERBOSE && echo "[*] Fetching syntax layout from: $CH_API/$COMMAND"
+CHEAT_RAW=$(curl -sL --max-time 5 "$CH_API/$COMMAND?T" | sed '/^$/d')
+
+if [ ! -z "$CHEAT_RAW" ] && [[ "$CHEAT_RAW" != *"404"* ]]; then
+    REMOTE_DESC=$(echo "$CHEAT_RAW" | grep -E '^# ' | head -n 2 | tail -n 1 | sed 's/^# //')
+fi
+
+if [ -z "$REMOTE_DESC" ] && [ ! -z "$HTML_DATA" ]; then
+    REMOTE_DESC=$(echo "$HTML_DATA" | grep -oP '(?<=<title>).*?(?=</title>)' | sed "s/Install $COMMAND templates//i" | sed "s/ command not found//i")
+fi
+
+# --- Step 3: Format and Display Sections ---
+
+echo "Description:"
+if [ ! -z "$LOCAL_DESC" ]; then
+    echo "  $LOCAL_DESC"
+elif [ ! -z "$REMOTE_DESC" ] && [[ "$REMOTE_DESC" != *"404"* ]]; then
+    echo "  $REMOTE_DESC"
+else
+    echo "  No description available for '$COMMAND'."
+fi
+echo "--------------------------------------------------------------------------------"
+
+echo "Installation Commands:"
+if [ -z "$FILTER" ] || [ "$FILTER" = "apt" ]; then
+    echo "  Debian/Ubuntu (APT):  $INSTALL_APT"
+fi
+if [ -z "$FILTER" ] || [ "$FILTER" = "pacman" ]; then
+    echo "  Arch Linux (Pacman):  $INSTALL_PACMAN"
+fi
+if [ -z "$FILTER" ] || [ "$FILTER" = "dnf" ]; then
+    echo "  Fedora/RedHat (DNF):  $INSTALL_DNF"
+fi
+if [ -z "$FILTER" ] || [ "$FILTER" = "zypper" ]; then
+    echo "  openSUSE (Zypper):    $INSTALL_ZYP"
+fi
+if [ -z "$FILTER" ] || [ "$FILTER" = "brew" ]; then
+    echo "  macOS/Linux (Brew):   $INSTALL_BREW"
+fi
+if [ -z "$FILTER" ] || [ "$FILTER" = "snap" ]; then
+    echo "  Universal (Snap):     $INSTALL_SNAP"
+fi
+echo "--------------------------------------------------------------------------------"
+
+echo "Syntax / Help Menu:"
+if [ ! -z "$LOCAL_HELP" ]; then
+    echo "$LOCAL_HELP"
+else
+    if [ ! -z "$CHEAT_RAW" ] && [[ "$CHEAT_RAW" != *"404"* ]]; then
+        LEFT_SIDE=""
+        RIGHT_SIDE=""
+        CURRENT_COMMENT=""
+        ROW_COUNT=0
+
+        while IFS= read -r line; do
+            [ $ROW_COUNT -ge 12 ] && break
+
+            if [[ "$line" =~ ^#\ (.*) ]]; then
+                CLEAN_LINE="${BASH_REMATCH[1]}"
+                [[ "$CLEAN_LINE" =~ ^(See also|More information|http|https|$COMMAND) ]] && continue
+                
+                if [ -z "$CURRENT_COMMENT" ]; then
+                    CURRENT_COMMENT="$CLEAN_LINE"
+                else
+                    CURRENT_COMMENT="$CURRENT_COMMENT; $CLEAN_LINE"
+                fi
+            else
+                [ -z "$line" ] && continue
+                [ -z "$CURRENT_COMMENT" ] && CURRENT_COMMENT="Execute"
+                
+                LEFT_SIDE+=$(echo "$CURRENT_COMMENT" | cut -c1-"$HALF_COLS")$'\n'
+                RIGHT_SIDE+=$(echo "$line" | cut -c1-"$HALF_COLS")$'\n'
+                
+                CURRENT_COMMENT="" 
+                ((ROW_COUNT++))
+            fi
+        done <<< "$CHEAT_RAW"
+
+        paste <(echo -e "--- EXPLANATION ---\n$LEFT_SIDE") <(echo -e "--- COMMANDS ---\n$RIGHT_SIDE") | pr -t -e -w "$TERM_COLS"
+    else
+        echo "  No remote layout syntax available. Try installing the package."
+    fi
+fi
