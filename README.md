@@ -1,4 +1,4 @@
-# cmdLookup
+# CMDLookup
 
 A smart Linux command lookup and package manager wrapper tool. It checks your local system for utilities, fetches detailed syntax/usage guides from ```cheat.sh```, and matches the exact upstream package names across multiple package managers using ```command-not-found.com```.
 
