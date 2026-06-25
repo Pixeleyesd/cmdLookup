@@ -26,7 +26,7 @@ show_help() {
     exit 0
 }
 
-# parse arguments
+# Parse Arguments
 COMMAND=""
 FILTER=""
 VERBOSE=false
@@ -60,15 +60,37 @@ if [ -z "$COMMAND" ]; then
     show_help
 fi
 
-# check localness
+# check local thing
 LOCAL_STATUS="Not installed"
 LOCAL_HELP=""
 LOCAL_DESC=""
+RESOLVED_BIN=""
 
 if command -v "$COMMAND" >/dev/null 2>&1; then
-    LOCAL_STATUS="Installed at $(command -v "$COMMAND")"
+    RESOLVED_BIN="$(command -v "$COMMAND")"
+    LOCAL_STATUS="Installed at $RESOLVED_BIN"
     LOCAL_DESC=$(whatis "$COMMAND" 2>/dev/null | awk -F ' - ' '{print $2}')
     LOCAL_HELP=$("$COMMAND" --help 2>&1 | head -n 15)
+else
+    # Not a binary on PATH - check if it's installed as a package instead.
+    PKG_INFO=""
+    if command -v dpkg-query >/dev/null 2>&1 && dpkg-query -W -f='${Status}' "$COMMAND" 2>/dev/null | grep -q "install ok installed"; then
+        LOCAL_STATUS="Installed (package: $COMMAND)"
+        PKG_INFO=$(dpkg-query -W -f='${binary:Package} - ${Description}' "$COMMAND" 2>/dev/null)
+        # If the package ships a binary of a different name, surface it too.
+        PKG_BIN=$(dpkg -L "$COMMAND" 2>/dev/null | grep -E '/(usr/)?bin/' | head -n 1)
+        [ ! -z "$PKG_BIN" ] && LOCAL_STATUS="Installed (package: $COMMAND, binary: $PKG_BIN)"
+    elif command -v pacman >/dev/null 2>&1 && pacman -Qi "$COMMAND" >/dev/null 2>&1; then
+        LOCAL_STATUS="Installed (package: $COMMAND)"
+        PKG_INFO=$(pacman -Qi "$COMMAND" 2>/dev/null | awk -F': ' '/^Description/{print $2}')
+    elif command -v rpm >/dev/null 2>&1 && rpm -q "$COMMAND" >/dev/null 2>&1; then
+        LOCAL_STATUS="Installed (package: $COMMAND)"
+        PKG_INFO=$(rpm -q --info "$COMMAND" 2>/dev/null | awk -F': ' '/^Summary/{print $2}')
+    elif command -v brew >/dev/null 2>&1 && brew list --formula "$COMMAND" >/dev/null 2>&1; then
+        LOCAL_STATUS="Installed (package: $COMMAND)"
+        PKG_INFO=$(brew info "$COMMAND" 2>/dev/null | sed -n '2p')
+    fi
+    [ ! -z "$PKG_INFO" ] && LOCAL_DESC="$PKG_INFO"
 fi
 
 if [ "$JSON_OUTPUT" = true ]; then
@@ -81,14 +103,14 @@ echo "--------------------------------------------------------------------------
 echo "Status: $LOCAL_STATUS"
 echo "--------------------------------------------------------------------------------"
 
-# remote package data
+# Fetch Remote Package Data & Metadata
 REMOTE_DESC=""
 CHEAT_RAW=""
 
 RED='\033[0;31m'
 NC='\033[0m'
 
-# check if any actual package was found
+# jf an actual packae was found through either api
 PKG_RESOLVED=false
 
 INSTALL_APT=""
@@ -102,27 +124,13 @@ clean_html() {
     sed -e 's/<[^>]*>//g' | sed 's/^[ \t]*//;s/[ \t]*$//'
 }
 
-# try primary ah pii
+# Try Primary API
 $VERBOSE && echo "[*] Connecting to primary API: $PKG_API_PRIMARY/$COMMAND"
 HTML_DATA=$(curl -sL --max-time 5 "$PKG_API_PRIMARY/$COMMAND")
+PRIMARY_HTML_DATA="$HTML_DATA"
 
-# fallback
-if [ -z "$HTML_DATA" ] || echo "$HTML_DATA" | grep -q "404 Not Found"; then
-    $VERBOSE && echo "[!] Primary API down or 404. Switching to backup: $PKG_API_BACKUP$COMMAND"
-    HTML_DATA=$(curl -sL --max-time 5 "$PKG_API_BACKUP$COMMAND")
-    
-    # Process backup response parsing pattern (Debian format)
-    if echo "$HTML_DATA" | grep -q "Package"; then
-        BACKUP_PKG=$(echo "$HTML_DATA" | grep -oP '(?<=<h3>Package ).*?(?=</h3>)' | head -n 1 | awk '{print $1}' | tr -d ':')
-        if [ ! -z "$BACKUP_PKG" ]; then
-            INSTALL_APT="sudo apt install $BACKUP_PKG"
-            INSTALL_PACMAN="sudo pacman -S $BACKUP_PKG"
-            INSTALL_DNF="sudo dnf install $BACKUP_PKG"
-            PKG_RESOLVED=true
-        fi
-    fi
-else
-    # Parse exact package names from primary layout for each manager
+# Parse exact package names from primary layout for each manager
+if [ ! -z "$HTML_DATA" ] && ! echo "$HTML_DATA" | grep -q "404 Not Found"; then
     if echo "$HTML_DATA" | grep -q "apt-get install"; then
         APT_PKG=$(echo "$HTML_DATA" | grep -A 1 "apt-get install" | clean_html | grep "apt-get install" | head -n 1 | awk '{print $3}')
         if [ ! -z "$APT_PKG" ]; then INSTALL_APT="sudo apt install $APT_PKG"; PKG_RESOLVED=true; fi
@@ -149,7 +157,34 @@ else
     fi
 fi
 
-# cheatsheet raw content
+# Fall back to the backup (Debian package-name) search whenever the
+# primary API didn't resolve anything - this covers both "primary is
+# down/404" (command-not-found.com has nothing) AND "primary loaded fine
+# but COMMAND is a package name rather than a binary name", since the
+# backup search is package-name based and catches what primary misses.
+if [ "$PKG_RESOLVED" = false ]; then
+    $VERBOSE && echo "[!] Primary API had no resolvable package. Trying backup: $PKG_API_BACKUP$COMMAND"
+    HTML_DATA=$(curl -sL --max-time 5 "$PKG_API_BACKUP$COMMAND")
+
+    # Process backup response parsing pattern (Debian format)
+    if echo "$HTML_DATA" | grep -q "Package"; then
+        BACKUP_PKG=$(echo "$HTML_DATA" | grep -oP '(?<=<h3>Package ).*?(?=</h3>)' | head -n 1 | awk '{print $1}' | tr -d ':')
+        if [ ! -z "$BACKUP_PKG" ]; then
+            INSTALL_APT="sudo apt install $BACKUP_PKG"
+            INSTALL_PACMAN="sudo pacman -S $BACKUP_PKG"
+            INSTALL_DNF="sudo dnf install $BACKUP_PKG"
+            PKG_RESOLVED=true
+        fi
+    fi
+fi
+
+# Keep HTML_DATA pointing at whichever response actually carried data,
+# for use later when deriving REMOTE_DESC.
+if [ -z "$HTML_DATA" ]; then
+    HTML_DATA="$PRIMARY_HTML_DATA"
+fi
+
+# Fetch cheatsheet raw content
 $VERBOSE && echo "[*] Fetching syntax layout from: $CH_API/$COMMAND"
 CHEAT_RAW=$(curl -sL --max-time 5 "$CH_API/$COMMAND?T" | sed '/^$/d')
 
@@ -161,7 +196,7 @@ if [ -z "$REMOTE_DESC" ] && [ ! -z "$HTML_DATA" ]; then
     REMOTE_DESC=$(echo "$HTML_DATA" | grep -oP '(?<=<title>).*?(?=</title>)' | sed "s/Install $COMMAND templates//i" | sed "s/ command not found//i")
 fi
 
-# format and display stuff
+# Format and Display Sections
 
 echo "Description:"
 if [ ! -z "$LOCAL_DESC" ]; then
